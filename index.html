@@ -359,6 +359,44 @@
             line-height: 1.6;
         }
 
+        .message-metadata {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 0.75rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid #565869;
+            font-size: 0.75rem;
+            color: #8e8ea0;
+            flex-wrap: wrap;
+        }
+
+        .metadata-item {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .metadata-icon {
+            font-size: 0.85rem;
+        }
+
+        .token-count {
+            font-weight: 600;
+            color: #19c37d;
+        }
+
+        .palace-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            background: #5436da;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            color: #ececf1;
+        }
+
         /* Markdown styles */
         .answer-content code {
             background: #1e1e1e;
@@ -1553,10 +1591,11 @@ Feel free to ask me anything!</div>
 
                         // Render message with thinking/answer structure if present
                         const botName = msg.botName || null;
+                        const metadata = msg.metadata || null;
                         if (msg.role === 'assistant' && msg.thinking) {
-                            renderAssistantMessageWithThinking(textContent, msg.thinking, media, botName);
+                            renderAssistantMessageWithThinking(textContent, msg.thinking, media, botName, metadata);
                         } else {
-                            addMessage(textContent, msg.role, false, media, botName);
+                            addMessage(textContent, msg.role, false, media, botName, metadata);
                         }
                     }
                 });
@@ -1565,7 +1604,7 @@ Feel free to ask me anything!</div>
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        function renderAssistantMessageWithThinking(content, thinking, media = null, botName = null) {
+        function renderAssistantMessageWithThinking(content, thinking, media = null, botName = null, metadata = null) {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message assistant';
 
@@ -1651,6 +1690,11 @@ Feel free to ask me anything!</div>
                 answerContentDiv.className = 'answer-content';
                 answerContentDiv.innerHTML = parseMarkdown(content);
                 contentDiv.appendChild(answerContentDiv);
+            }
+
+            // Add metadata if present
+            if (metadata) {
+                addMessageMetadata(contentDiv, metadata);
             }
 
             messageDiv.appendChild(iconDiv);
@@ -2167,8 +2211,11 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
                 let toolCalls = [];
                 let thinkingContentDiv = null;
                 let answerContentDiv = null;
+                let lastChunk = null;
 
                 for await (const chunk of stream) {
+                    lastChunk = chunk; // Keep track of the last chunk with metadata
+
                     if (chunk.message.thinking) {
                         if (!inThinking) {
                             inThinking = true;
@@ -2225,6 +2272,17 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
                     }
                 }
 
+                // Add metadata display after streaming is complete
+                if (lastChunk && lastChunk.done) {
+                    const metadata = {
+                        promptTokens: lastChunk.prompt_eval_count || 0,
+                        responseTokens: lastChunk.eval_count || 0,
+                        palaceRetrieval: null // Will be populated if Palace was used
+                    };
+
+                    addMessageMetadata(contentDiv, metadata);
+                }
+
                 // Handle tool calls if present
                 if (toolCalls && toolCalls.length > 0) {
                     for (const toolCall of toolCalls) {
@@ -2256,6 +2314,15 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
 
                     if (botName) {
                         assistantMessage.botName = botName;
+                    }
+
+                    // Store token metadata
+                    if (lastChunk && lastChunk.done) {
+                        assistantMessage.metadata = {
+                            promptTokens: lastChunk.prompt_eval_count || 0,
+                            responseTokens: lastChunk.eval_count || 0,
+                            timestamp: Date.now()
+                        };
                     }
 
                     history.push(assistantMessage);
@@ -2405,7 +2472,44 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
             messageInput.focus();
         }
 
-        function addMessage(content, role, isLoading = false, media = null, botName = null) {
+        // Helper function to add metadata display to a message
+        function addMessageMetadata(contentDiv, metadata) {
+            if (!metadata) return;
+
+            const metadataDiv = document.createElement('div');
+            metadataDiv.className = 'message-metadata';
+
+            // Add token counts
+            if (metadata.promptTokens || metadata.responseTokens) {
+                const tokenItem = document.createElement('div');
+                tokenItem.className = 'metadata-item';
+                tokenItem.innerHTML = `
+                    <span class="metadata-icon">📊</span>
+                    <span>Tokens:</span>
+                    <span class="token-count">↑${metadata.promptTokens || 0}</span>
+                    <span>/</span>
+                    <span class="token-count">↓${metadata.responseTokens || 0}</span>
+                `;
+                metadataDiv.appendChild(tokenItem);
+            }
+
+            // Add Palace retrieval indicator
+            if (metadata.palaceRetrieval) {
+                const palaceItem = document.createElement('div');
+                palaceItem.className = 'metadata-item';
+
+                const indicator = document.createElement('span');
+                indicator.className = 'palace-indicator';
+                indicator.innerHTML = `🏛️ ${metadata.palaceRetrieval}`;
+                palaceItem.appendChild(indicator);
+
+                metadataDiv.appendChild(palaceItem);
+            }
+
+            contentDiv.appendChild(metadataDiv);
+        }
+
+        function addMessage(content, role, isLoading = false, media = null, botName = null, metadata = null) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
 
@@ -2472,6 +2576,11 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
                         textDiv.textContent = content;
                     }
                     contentDiv.appendChild(textDiv);
+                }
+
+                // Add metadata if present
+                if (metadata && role === 'assistant') {
+                    addMessageMetadata(contentDiv, metadata);
                 }
             }
 
