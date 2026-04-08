@@ -1933,14 +1933,68 @@ Feel free to ask me anything!</div>
 
         sendButton.addEventListener('click', sendMessage);
 
+        // Build enhanced history with bot identity for group chats
+        function buildEnhancedHistory(currentBot, history) {
+            const currentBotData = bots[currentBotId];
+            const isGroupChat = currentBotData && currentBotData.isGroupChat;
+
+            if (!isGroupChat) {
+                // For regular chats, return history as-is
+                return history;
+            }
+
+            // For group chats, enhance messages with bot identity
+            const enhancedHistory = [];
+
+            // Add system message to establish the bot's identity
+            const participants = getGroupParticipants(currentBotId);
+            const participantNames = participants.map(p => p.name).join(', ');
+
+            enhancedHistory.push({
+                role: 'system',
+                content: `You are ${currentBot.name}, participating in a group chat with: ${participantNames}.
+Your unique perspective and personality should come through in your responses.
+When you see messages from other bots, they will be prefixed with their name in square brackets.
+Always respond as ${currentBot.name} with your own distinct voice and viewpoint.`
+            });
+
+            // Process each message to add bot identity markers
+            for (const msg of history) {
+                if (msg.role === 'assistant' && msg.botName) {
+                    // This is a message from another bot - prefix it with their name
+                    const enhancedMsg = { ...msg };
+
+                    if (typeof enhancedMsg.content === 'string') {
+                        enhancedMsg.content = `[${msg.botName}]: ${enhancedMsg.content}`;
+                    }
+
+                    enhancedHistory.push(enhancedMsg);
+                } else if (msg.role === 'user') {
+                    // User messages stay the same
+                    enhancedHistory.push(msg);
+                } else if (msg.role === 'tool') {
+                    // Tool responses stay the same
+                    enhancedHistory.push(msg);
+                } else if (msg.role === 'assistant') {
+                    // Assistant message without botName (shouldn't happen in group chat, but handle it)
+                    enhancedHistory.push(msg);
+                }
+            }
+
+            return enhancedHistory;
+        }
+
         // Helper function to get bot response
         async function getBotResponse(bot, history, botName = null) {
             const loadingDiv = addMessage('', 'assistant', true, null, botName || bot.name);
 
             try {
+                // Build enhanced history for group chats with bot identity
+                const enhancedHistory = buildEnhancedHistory(bot, history);
+
                 const stream = await ollama.chat({
                     model: bot.model,
-                    messages: history,
+                    messages: enhancedHistory,
                     tools: tools,
                     stream: true,
                 });
@@ -2077,7 +2131,7 @@ Feel free to ask me anything!</div>
             triggerNextBot.disabled = true;
             triggerAllBots.disabled = true;
 
-            await getBotResponse(nextBot, conversationHistory);
+            await getBotResponse(nextBot, conversationHistory, nextBot.name);
 
             isProcessingGroupResponse = false;
             triggerNextBot.disabled = false;
@@ -2102,7 +2156,7 @@ Feel free to ask me anything!</div>
 
             // Get responses from all bots sequentially
             for (const bot of participants) {
-                await getBotResponse(bot, conversationHistory);
+                await getBotResponse(bot, conversationHistory, bot.name);
             }
 
             isProcessingGroupResponse = false;
