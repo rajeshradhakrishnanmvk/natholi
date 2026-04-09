@@ -87,6 +87,9 @@ See [ORCHESTRATOR_GUIDE.md](ORCHESTRATOR_GUIDE.md) for detailed documentation.
 ### Cookies
 - `get_cookies`, `set_cookie`
 
+### File System
+- `read_files_from_folder` - Read all files from a folder with optional extension filter
+
 ### Utility
 - `clear_storage` - Clear all storage
 
@@ -99,6 +102,20 @@ AI: ✅ Successfully set name in localStorage
 
 You: What's in my localStorage?
 AI: {"name": "John"}
+```
+
+### Reading Files from Folders
+```
+You: Read all markdown files from the wiki folder
+AI: [Calls read_files_from_folder tool]
+    Files in folder 'wiki':
+
+    Found 10 file(s) with extension '.md':
+
+    --- File 1: GROUP_CHAT_GUIDE.md ---
+    Path: wiki/GROUP_CHAT_GUIDE.md
+    Content: [full content]
+    ...
 ```
 
 ### Group Chat with Orchestrator

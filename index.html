@@ -439,6 +439,82 @@
             color: #ececf1;
         }
 
+        .message-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .delete-message-btn {
+            padding: 0.4rem 0.75rem;
+            background: transparent;
+            border: 1px solid #ef4444;
+            color: #ef4444;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .delete-message-btn:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        /* Streaming control buttons */
+        .streaming-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .stop-stream-btn, .continue-stream-btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .stop-stream-btn {
+            background: #ef4444;
+            color: #fff;
+        }
+
+        .stop-stream-btn:hover {
+            background: #dc2626;
+        }
+
+        .continue-stream-btn {
+            background: #19c37d;
+            color: #fff;
+        }
+
+        .continue-stream-btn:hover {
+            background: #16a865;
+        }
+
+        .word-limit-notice {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            background: #f59e0b;
+            color: #1e1e1e;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
         /* Markdown styles */
         .answer-content code {
             background: #1e1e1e;
@@ -1054,6 +1130,29 @@ Feel free to ask me anything!</div>
         </div>
     </div>
 
+    <!-- File Edit Confirmation Modal -->
+    <div class="modal" id="fileEditModal">
+        <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+            <h2 class="modal-title">Confirm File Changes</h2>
+            <div class="form-group">
+                <label class="form-label">File Path:</label>
+                <div id="fileEditPath" style="padding: 0.5rem; background: #40414f; border-radius: 4px; font-family: monospace; margin-bottom: 1rem;"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Changes Description:</label>
+                <div id="fileEditDescription" style="padding: 0.5rem; background: #40414f; border-radius: 4px; margin-bottom: 1rem;"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">New Content Preview:</label>
+                <pre id="fileEditPreview" style="padding: 1rem; background: #1e1e1e; border-radius: 4px; overflow-x: auto; max-height: 400px; overflow-y: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 0.9rem; line-height: 1.4; border: 1px solid #565869;"></pre>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelFileEditBtn">Reject Changes</button>
+                <button class="btn btn-primary" id="confirmFileEditBtn">Apply Changes</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Memory Palace Toggle Button -->
     <button id="palace-toggle-btn" class="palace-toggle-btn" title="Open Memory Palace">
         🏛️
@@ -1109,6 +1208,12 @@ Feel free to ask me anything!</div>
         const editBotSelector = document.getElementById('editBotSelector');
         const saveGroupBtn = document.getElementById('saveGroupBtn');
         const cancelEditGroupBtn = document.getElementById('cancelEditGroupBtn');
+        const fileEditModal = document.getElementById('fileEditModal');
+        const fileEditPath = document.getElementById('fileEditPath');
+        const fileEditDescription = document.getElementById('fileEditDescription');
+        const fileEditPreview = document.getElementById('fileEditPreview');
+        const confirmFileEditBtn = document.getElementById('confirmFileEditBtn');
+        const cancelFileEditBtn = document.getElementById('cancelFileEditBtn');
         const groupControls = document.getElementById('groupControls');
         const triggerNextBot = document.getElementById('triggerNextBot');
         const triggerAllBots = document.getElementById('triggerAllBots');
@@ -1124,6 +1229,14 @@ Feel free to ask me anything!</div>
         let isProcessingGroupResponse = false;
         let editingGroupId = null;
         let useOrchestrator = false;
+        let pendingFileEdit = null; // Stores pending file edit data for confirmation
+
+        // Streaming control variables
+        let streamAbortController = null;
+        let isStreamPaused = false;
+        let currentStreamingDiv = null;
+        let wordLimitReached = false;
+        const WORD_LIMIT = 250;
 
         // Memory Palace
         let palaceUI = null;
@@ -1275,6 +1388,49 @@ Feel free to ask me anything!</div>
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // Word counting and streaming control functions
+        function countWords(text) {
+            if (!text) return 0;
+            return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+        }
+
+        function createStreamControls(contentDiv, onStop, onContinue, showContinue = false) {
+            const controlsDiv = document.createElement('div');
+            controlsDiv.className = 'streaming-controls';
+
+            // Stop button (always visible while streaming)
+            const stopBtn = document.createElement('button');
+            stopBtn.className = 'stop-stream-btn';
+            stopBtn.innerHTML = '⏹️ Stop';
+            stopBtn.onclick = onStop;
+            controlsDiv.appendChild(stopBtn);
+
+            // Continue button (shown when word limit reached)
+            if (showContinue) {
+                const continueBtn = document.createElement('button');
+                continueBtn.className = 'continue-stream-btn';
+                continueBtn.innerHTML = '▶️ Continue (Detailed)';
+                continueBtn.onclick = onContinue;
+                controlsDiv.appendChild(continueBtn);
+
+                // Add word limit notice
+                const notice = document.createElement('span');
+                notice.className = 'word-limit-notice';
+                notice.innerHTML = `⚠️ ${WORD_LIMIT} word limit reached`;
+                controlsDiv.appendChild(notice);
+            }
+
+            contentDiv.appendChild(controlsDiv);
+            return controlsDiv;
+        }
+
+        function removeStreamControls(contentDiv) {
+            const controls = contentDiv.querySelector('.streaming-controls');
+            if (controls) {
+                controls.remove();
+            }
         }
 
         async function handleImageSelect(event) {
@@ -1607,7 +1763,7 @@ Feel free to ask me anything!</div>
                 chatContainer.appendChild(welcomeMsg);
             } else {
                 // Render conversation history
-                conversationHistory.forEach(msg => {
+                conversationHistory.forEach((msg, index) => {
                     if (msg.role === 'user' || msg.role === 'assistant') {
                         // Handle different content formats
                         let textContent = '';
@@ -1647,13 +1803,18 @@ Feel free to ask me anything!</div>
                             });
                         }
 
+                        // Check if this is the last message and it's a user message without a response
+                        const isLastMessage = index === conversationHistory.length - 1;
+                        const isUserMessage = msg.role === 'user';
+                        const canDelete = isLastMessage && isUserMessage;
+
                         // Render message with thinking/answer structure if present
                         const botName = msg.botName || null;
                         const metadata = msg.metadata || null;
                         if (msg.role === 'assistant' && msg.thinking) {
-                            renderAssistantMessageWithThinking(textContent, msg.thinking, media, botName, metadata);
+                            renderAssistantMessageWithThinking(textContent, msg.thinking, media, botName, metadata, index, canDelete);
                         } else {
-                            addMessage(textContent, msg.role, false, media, botName, metadata);
+                            addMessage(textContent, msg.role, false, media, botName, metadata, false, index, canDelete);
                         }
                     }
                 });
@@ -1662,7 +1823,7 @@ Feel free to ask me anything!</div>
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        function renderAssistantMessageWithThinking(content, thinking, media = null, botName = null, metadata = null) {
+        function renderAssistantMessageWithThinking(content, thinking, media = null, botName = null, metadata = null, messageIndex = -1, canDelete = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message assistant';
 
@@ -1940,6 +2101,49 @@ Feel free to ask me anything!</div>
             }
         });
 
+        // File edit modal handlers
+        cancelFileEditBtn.addEventListener('click', () => {
+            fileEditModal.classList.remove('show');
+            pendingFileEdit = null;
+        });
+
+        confirmFileEditBtn.addEventListener('click', async () => {
+            if (!pendingFileEdit) return;
+
+            try {
+                const response = await fetch('/api/edit-web-file', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filePath: pendingFileEdit.filePath,
+                        newContent: pendingFileEdit.newContent
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Resolve the promise to return success to the LLM
+                    if (pendingFileEdit.resolve) {
+                        pendingFileEdit.resolve(`✅ File ${pendingFileEdit.filePath} was successfully updated!\n${result.message}\nOriginal size: ${result.originalSize} bytes\nNew size: ${result.newSize} bytes`);
+                    }
+                } else {
+                    if (pendingFileEdit.reject) {
+                        pendingFileEdit.reject(new Error(result.error || 'Failed to save file'));
+                    }
+                }
+            } catch (error) {
+                if (pendingFileEdit.reject) {
+                    pendingFileEdit.reject(error);
+                }
+            } finally {
+                fileEditModal.classList.remove('show');
+                pendingFileEdit = null;
+            }
+        });
+
         // Close modal on Escape key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
@@ -1952,6 +2156,13 @@ Feel free to ask me anything!</div>
                 if (editGroupModal.classList.contains('show')) {
                     editGroupModal.classList.remove('show');
                     editingGroupId = null;
+                }
+                if (fileEditModal.classList.contains('show')) {
+                    fileEditModal.classList.remove('show');
+                    if (pendingFileEdit && pendingFileEdit.reject) {
+                        pendingFileEdit.reject(new Error('User cancelled the file edit'));
+                    }
+                    pendingFileEdit = null;
                 }
             }
         });
@@ -2094,6 +2305,52 @@ Feel free to ask me anything!</div>
                         properties: {}
                     }
                 }
+            },
+            {
+                type: "function",
+                function: {
+                    name: "read_files_from_folder",
+                    description: "Read all files from a specified folder path. Returns a list of files with their names and contents. Note: This is a client-side tool that can only access files that have been explicitly made available through the server.",
+                    parameters: {
+                        type: "object",
+                        required: ["folder_path"],
+                        properties: {
+                            folder_path: {
+                                type: "string",
+                                description: "The folder path to read files from (e.g., 'wiki', 'public', '.')"
+                            },
+                            file_extension: {
+                                type: "string",
+                                description: "Optional file extension filter (e.g., '.md', '.js', '.html'). If not provided, all files are returned."
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                type: "function",
+                function: {
+                    name: "edit_web_file",
+                    description: "Propose changes to HTML, CSS, or JavaScript files. The user will be shown a confirmation dialog with the proposed changes before they are applied. Only works for files in 'public' and 'teamgenz' folders. Use this when you need to modify web files based on user requests.",
+                    parameters: {
+                        type: "object",
+                        required: ["file_path", "new_content", "change_description"],
+                        properties: {
+                            file_path: {
+                                type: "string",
+                                description: "The relative path to the file to edit (e.g., 'public/style.css', 'teamgenz/index.html')"
+                            },
+                            new_content: {
+                                type: "string",
+                                description: "The complete new content for the file"
+                            },
+                            change_description: {
+                                type: "string",
+                                description: "A clear description of what changes are being made and why (shown to user for confirmation)"
+                            }
+                        }
+                    }
+                }
             }
         ];
 
@@ -2168,6 +2425,80 @@ Feel free to ask me anything!</div>
                         document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
                     });
                     return 'Successfully cleared all storage';
+
+                case 'read_files_from_folder':
+                    try {
+                        const folderPath = args.folder_path || '.';
+                        const fileExtension = args.file_extension || '';
+
+                        // Fetch the folder contents from the server
+                        const response = await fetch(`/api/read-folder?path=${encodeURIComponent(folderPath)}&ext=${encodeURIComponent(fileExtension)}`);
+
+                        if (!response.ok) {
+                            throw new Error(`Failed to read folder: ${response.statusText}`);
+                        }
+
+                        const data = await response.json();
+
+                        if (data.error) {
+                            return `Error reading folder: ${data.error}`;
+                        }
+
+                        // Format the response
+                        let result = `Files in folder '${folderPath}':\n\n`;
+
+                        if (data.files && data.files.length > 0) {
+                            result += `Found ${data.files.length} file(s)${fileExtension ? ` with extension '${fileExtension}'` : ''}:\n\n`;
+
+                            data.files.forEach((file, index) => {
+                                result += `--- File ${index + 1}: ${file.name} ---\n`;
+                                result += `Path: ${file.path}\n`;
+                                result += `Size: ${file.size} bytes\n`;
+                                result += `Content:\n${file.content}\n\n`;
+                            });
+                        } else {
+                            result += `No files found${fileExtension ? ` with extension '${fileExtension}'` : ''}.`;
+                        }
+
+                        return result;
+                    } catch (error) {
+                        return `Error reading folder: ${error.message}`;
+                    }
+
+                case 'edit_web_file':
+                    return new Promise((resolve, reject) => {
+                        try {
+                            const filePath = args.file_path;
+                            const newContent = args.new_content;
+                            const changeDescription = args.change_description;
+
+                            if (!filePath || newContent === undefined || !changeDescription) {
+                                reject(new Error('Missing required parameters: file_path, new_content, or change_description'));
+                                return;
+                            }
+
+                            // Store the pending edit with resolve/reject callbacks
+                            pendingFileEdit = {
+                                filePath,
+                                newContent,
+                                changeDescription,
+                                resolve,
+                                reject
+                            };
+
+                            // Populate the modal
+                            fileEditPath.textContent = filePath;
+                            fileEditDescription.textContent = changeDescription;
+                            fileEditPreview.textContent = newContent;
+
+                            // Show the confirmation modal
+                            fileEditModal.classList.add('show');
+
+                            // Note: The promise will be resolved/rejected by the modal button handlers
+                        } catch (error) {
+                            reject(error);
+                        }
+                    });
 
                 default:
                     return `Unknown function: ${functionName}`;
@@ -2299,12 +2630,17 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
         }
 
         // Helper function to get bot response
-        async function getBotResponse(bot, history, botName = null, orchestratorSelected = false) {
+        async function getBotResponse(bot, history, botName = null, orchestratorSelected = false, resumeStreaming = false) {
             const loadingDiv = addMessage('', 'assistant', true, null, botName || bot.name, orchestratorSelected);
 
             try {
                 // Build enhanced history for group chats with bot identity
                 const enhancedHistory = buildEnhancedHistory(bot, history);
+
+                // Create abort controller for stream cancellation
+                streamAbortController = new AbortController();
+                isStreamPaused = false;
+                wordLimitReached = false;
 
                 const stream = await ollama.chat({
                     model: bot.model,
@@ -2320,13 +2656,37 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
                 loadingDiv.remove();
                 const assistantDiv = addMessage('', 'assistant', false, null, botName || bot.name, null, orchestratorSelected);
                 const contentDiv = assistantDiv.querySelector('.message-content');
+                currentStreamingDiv = contentDiv;
 
                 let toolCalls = [];
                 let thinkingContentDiv = null;
                 let answerContentDiv = null;
                 let lastChunk = null;
 
+                // Add stop button
+                let streamControls = createStreamControls(
+                    contentDiv,
+                    () => {
+                        // Stop button handler
+                        if (streamAbortController) {
+                            streamAbortController.abort();
+                            removeStreamControls(contentDiv);
+                        }
+                    },
+                    null, // Continue handler will be added later if needed
+                    false
+                );
+
                 for await (const chunk of stream) {
+                    // Check if stream was aborted
+                    if (streamAbortController.signal.aborted) {
+                        break;
+                    }
+
+                    // Check if paused at word limit
+                    if (isStreamPaused) {
+                        break;
+                    }
                     lastChunk = chunk; // Keep track of the last chunk with metadata
 
                     if (chunk.message.thinking) {
@@ -2378,11 +2738,68 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
                             contentDiv.innerHTML = parseMarkdown(content);
                         }
                         chatContainer.scrollTop = chatContainer.scrollHeight;
+
+                        // Check word limit (only if not resuming)
+                        if (!resumeStreaming && !wordLimitReached) {
+                            const wordCount = countWords(content);
+                            if (wordCount >= WORD_LIMIT) {
+                                wordLimitReached = true;
+                                isStreamPaused = true;
+
+                                // Remove old controls and add new ones with continue button
+                                removeStreamControls(contentDiv);
+                                streamControls = createStreamControls(
+                                    contentDiv,
+                                    () => {
+                                        // Stop button handler
+                                        if (streamAbortController) {
+                                            streamAbortController.abort();
+                                            removeStreamControls(contentDiv);
+                                        }
+                                    },
+                                    async () => {
+                                        // Continue button handler
+                                        removeStreamControls(contentDiv);
+                                        isStreamPaused = false;
+
+                                        // Resume streaming by making a new request with current history
+                                        // Add current partial response to history
+                                        const partialMessage = {
+                                            role: 'assistant',
+                                            content: content
+                                        };
+                                        if (thinking) {
+                                            partialMessage.thinking = thinking;
+                                        }
+                                        if (botName) {
+                                            partialMessage.botName = botName;
+                                        }
+
+                                        // Continue with detailed response
+                                        history.push(partialMessage);
+                                        history.push({
+                                            role: 'user',
+                                            content: 'Please continue with a more detailed response.'
+                                        });
+
+                                        await getBotResponse(bot, history, botName, orchestratorSelected, true);
+                                    },
+                                    true
+                                );
+
+                                break; // Stop streaming at word limit
+                            }
+                        }
                     }
 
                     if (chunk.message.tool_calls) {
                         toolCalls = chunk.message.tool_calls;
                     }
+                }
+
+                // Remove streaming controls if streaming completed normally
+                if (!isStreamPaused) {
+                    removeStreamControls(contentDiv);
                 }
 
                 // Add metadata display after streaming is complete
@@ -2438,13 +2855,25 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
                         };
                     }
 
-                    history.push(assistantMessage);
-                    saveCurrentBotHistory();
+                    // Only save to history if not paused at word limit
+                    if (!isStreamPaused) {
+                        history.push(assistantMessage);
+                        saveCurrentBotHistory();
 
-                    // Save to Memory Palace
-                    await saveToMemoryPalace(assistantMessage, 'assistant');
+                        // Save to Memory Palace
+                        await saveToMemoryPalace(assistantMessage, 'assistant');
+                    }
                 }
+
+                // Reset streaming state
+                streamAbortController = null;
+                currentStreamingDiv = null;
             } catch (error) {
+                // Clean up on error
+                removeStreamControls(contentDiv);
+                streamAbortController = null;
+                currentStreamingDiv = null;
+
                 loadingDiv.remove();
                 addMessage(`Error: ${error.message}`, 'assistant', false, null, botName || bot.name);
                 console.error('Chat error:', error);
@@ -2664,7 +3093,7 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
             contentDiv.appendChild(metadataDiv);
         }
 
-        function addMessage(content, role, isLoading = false, media = null, botName = null, metadata = null, orchestratorSelected = false) {
+        function addMessage(content, role, isLoading = false, media = null, botName = null, metadata = null, orchestratorSelected = false, messageIndex = -1, canDelete = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
 
@@ -2739,6 +3168,20 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
                 if (metadata && role === 'assistant') {
                     addMessageMetadata(contentDiv, metadata);
                 }
+
+                // Add delete button if this is a user message that can be deleted
+                if (canDelete && role === 'user') {
+                    const actionsDiv = document.createElement('div');
+                    actionsDiv.className = 'message-actions';
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'delete-message-btn';
+                    deleteBtn.innerHTML = '🗑️ Delete Message';
+                    deleteBtn.onclick = () => deleteMessage(messageIndex);
+
+                    actionsDiv.appendChild(deleteBtn);
+                    contentDiv.appendChild(actionsDiv);
+                }
             }
 
             messageDiv.appendChild(iconDiv);
@@ -2747,6 +3190,22 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
             return messageDiv;
+        }
+
+        // Function to delete a message from history
+        function deleteMessage(messageIndex) {
+            if (confirm('Are you sure you want to delete this message?')) {
+                // Remove the message from conversation history
+                conversationHistory.splice(messageIndex, 1);
+
+                // Save the updated history
+                saveCurrentBotHistory();
+
+                // Re-render the chat
+                renderChat();
+
+                console.log('✅ Message deleted from history');
+            }
         }
     </script>
 </body>
