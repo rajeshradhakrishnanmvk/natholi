@@ -76,6 +76,43 @@
             background: #6646ea;
         }
 
+        .orchestrator-toggle {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: #343541;
+            border: 1px solid #565869;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: #ececf1;
+        }
+
+        .orchestrator-toggle.show {
+            display: flex;
+        }
+
+        .orchestrator-toggle input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .orchestrator-toggle label {
+            flex: 1;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .orchestrator-badge {
+            background: #f59e0b;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
         .bots-list {
             flex: 1;
             overflow-y: auto;
@@ -296,6 +333,11 @@
             border-radius: 4px;
             font-size: 0.75rem;
             font-weight: 600;
+        }
+
+        .orchestrator-selected {
+            background: #f59e0b;
+            color: #1e1e1e;
         }
 
         .message-content {
@@ -879,6 +921,10 @@
                 </svg>
                 New Group Chat
             </button>
+            <div class="orchestrator-toggle" id="orchestratorToggle">
+                <input type="checkbox" id="orchestratorCheckbox">
+                <label for="orchestratorCheckbox">🎭 Use Orchestrator</label>
+            </div>
         </div>
         <div class="bots-list" id="botsList"></div>
     </div>
@@ -1066,6 +1112,8 @@ Feel free to ask me anything!</div>
         const groupControls = document.getElementById('groupControls');
         const triggerNextBot = document.getElementById('triggerNextBot');
         const triggerAllBots = document.getElementById('triggerAllBots');
+        const orchestratorToggle = document.getElementById('orchestratorToggle');
+        const orchestratorCheckbox = document.getElementById('orchestratorCheckbox');
 
         let conversationHistory = [];
         let currentBotId = null;
@@ -1075,6 +1123,7 @@ Feel free to ask me anything!</div>
         let groupChats = {};
         let isProcessingGroupResponse = false;
         let editingGroupId = null;
+        let useOrchestrator = false;
 
         // Memory Palace
         let palaceUI = null;
@@ -1391,8 +1440,16 @@ Feel free to ask me anything!</div>
             // Show/hide group controls based on whether this is a group chat
             if (bot.isGroupChat) {
                 groupControls.classList.add('active');
+                orchestratorToggle.classList.add('show');
+
+                // Load saved orchestrator preference for this group
+                if (bot.useOrchestrator !== undefined) {
+                    useOrchestrator = bot.useOrchestrator;
+                    orchestratorCheckbox.checked = bot.useOrchestrator;
+                }
             } else {
                 groupControls.classList.remove('active');
+                orchestratorToggle.classList.remove('show');
             }
 
             // Clear and reload chat
@@ -1416,7 +1473,8 @@ Feel free to ask me anything!</div>
                 participants: participantIds, // Array of bot IDs
                 history: [],
                 createdAt: Date.now(),
-                currentParticipantIndex: 0
+                currentParticipantIndex: 0,
+                useOrchestrator: false
             };
             bots[groupChat.id] = groupChat;
             saveBots();
@@ -1538,7 +1596,7 @@ Feel free to ask me anything!</div>
                 welcomeMsg.className = 'message assistant';
                 welcomeMsg.innerHTML = `
                     <div class="message-icon">AI</div>
-                    <div class="message-content">Hello! I'm your AI assistant powered by Ollama 🤖
+                    <div class="message-content">Hello! I'm your AI assistant powered by Ollama: Gemma4 🤖
 
 I can help you with various tasks and access browser storage tools like localStorage, sessionStorage, and cookies.
 
@@ -2134,6 +2192,61 @@ Feel free to ask me anything!</div>
 
         sendButton.addEventListener('click', sendMessage);
 
+        // Orchestrator checkbox handler
+        orchestratorCheckbox.addEventListener('change', (e) => {
+            useOrchestrator = e.target.checked;
+
+            // Save the preference for this group chat
+            if (currentBotId && bots[currentBotId] && bots[currentBotId].isGroupChat) {
+                bots[currentBotId].useOrchestrator = useOrchestrator;
+                saveBots();
+            }
+        });
+
+        // Orchestrator function to decide which bot should respond
+        async function getOrchestratorDecision(participants, history) {
+            const participantList = participants.map((p, i) => `${i + 1}. ${p.name} (${p.model})`).join('\n');
+
+            const orchestratorPrompt = `You are an intelligent conversation orchestrator managing a group chat.
+
+Participants:
+${participantList}
+
+Your task is to analyze the conversation and decide which bot should respond next based on:
+- The topic being discussed
+- Each bot's expertise (implied by their name and model)
+- The flow of conversation
+- Who would provide the most valuable perspective right now
+
+Recent conversation:
+${history.slice(-5).map(msg => {
+    if (msg.role === 'user') return `User: ${typeof msg.content === 'string' ? msg.content : 'media message'}`;
+    if (msg.role === 'assistant') return `${msg.botName || 'Bot'}: ${typeof msg.content === 'string' ? msg.content.substring(0, 200) : 'response'}`;
+    return '';
+}).filter(Boolean).join('\n')}
+
+Respond with ONLY the number (1-${participants.length}) of the bot that should respond next. Do not include any explanation, just the number.`;
+
+            try {
+                // Use the first available bot's model for orchestration
+                const response = await ollama.chat({
+                    model: participants[0].model,
+                    messages: [{ role: 'user', content: orchestratorPrompt }],
+                    stream: false,
+                });
+
+                const decision = parseInt(response.message.content.trim());
+                if (decision >= 1 && decision <= participants.length) {
+                    return participants[decision - 1];
+                }
+            } catch (error) {
+                console.error('Orchestrator error:', error);
+            }
+
+            // Fallback to round-robin if orchestrator fails
+            return null;
+        }
+
         // Build enhanced history with bot identity for group chats
         function buildEnhancedHistory(currentBot, history) {
             const currentBotData = bots[currentBotId];
@@ -2186,8 +2299,8 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
         }
 
         // Helper function to get bot response
-        async function getBotResponse(bot, history, botName = null) {
-            const loadingDiv = addMessage('', 'assistant', true, null, botName || bot.name);
+        async function getBotResponse(bot, history, botName = null, orchestratorSelected = false) {
+            const loadingDiv = addMessage('', 'assistant', true, null, botName || bot.name, orchestratorSelected);
 
             try {
                 // Build enhanced history for group chats with bot identity
@@ -2205,7 +2318,7 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
                 let thinking = '';
 
                 loadingDiv.remove();
-                const assistantDiv = addMessage('', 'assistant', false, null, botName || bot.name);
+                const assistantDiv = addMessage('', 'assistant', false, null, botName || bot.name, null, orchestratorSelected);
                 const contentDiv = assistantDiv.querySelector('.message-content');
 
                 let toolCalls = [];
@@ -2345,7 +2458,28 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
             const currentBot = bots[currentBotId];
             if (!currentBot || !currentBot.isGroupChat) return;
 
-            const nextBot = getNextParticipant(currentBotId);
+            let nextBot;
+            let isOrchestratorSelected = false;
+
+            // Use orchestrator if enabled
+            if (useOrchestrator) {
+                const participants = getGroupParticipants(currentBotId);
+                const orchestratorChoice = await getOrchestratorDecision(participants, conversationHistory);
+
+                if (orchestratorChoice) {
+                    nextBot = orchestratorChoice;
+                    isOrchestratorSelected = true;
+                    console.log('🎭 Orchestrator selected:', nextBot.name);
+                } else {
+                    // Fallback to round-robin
+                    nextBot = getNextParticipant(currentBotId);
+                    console.log('🔄 Fallback to round-robin:', nextBot?.name);
+                }
+            } else {
+                // Use round-robin
+                nextBot = getNextParticipant(currentBotId);
+            }
+
             if (!nextBot) {
                 alert('No available bots in this group');
                 return;
@@ -2355,7 +2489,7 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
             triggerNextBot.disabled = true;
             triggerAllBots.disabled = true;
 
-            await getBotResponse(nextBot, conversationHistory, nextBot.name);
+            await getBotResponse(nextBot, conversationHistory, nextBot.name, isOrchestratorSelected);
 
             isProcessingGroupResponse = false;
             triggerNextBot.disabled = false;
@@ -2454,9 +2588,30 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
             try {
                 // Handle group chat or regular bot
                 if (currentBot.isGroupChat) {
-                    const nextBot = getNextParticipant(currentBotId);
+                    let nextBot;
+                    let isOrchestratorSelected = false;
+
+                    // Use orchestrator if enabled
+                    if (useOrchestrator) {
+                        const participants = getGroupParticipants(currentBotId);
+                        const orchestratorChoice = await getOrchestratorDecision(participants, conversationHistory);
+
+                        if (orchestratorChoice) {
+                            nextBot = orchestratorChoice;
+                            isOrchestratorSelected = true;
+                            console.log('🎭 Orchestrator selected:', nextBot.name);
+                        } else {
+                            // Fallback to round-robin
+                            nextBot = getNextParticipant(currentBotId);
+                            console.log('🔄 Fallback to round-robin:', nextBot?.name);
+                        }
+                    } else {
+                        // Use round-robin
+                        nextBot = getNextParticipant(currentBotId);
+                    }
+
                     if (nextBot) {
-                        await getBotResponse(nextBot, conversationHistory, nextBot.name);
+                        await getBotResponse(nextBot, conversationHistory, nextBot.name, isOrchestratorSelected);
                     } else {
                         addMessage('Error: No available bots in this group', 'assistant');
                     }
@@ -2509,7 +2664,7 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
             contentDiv.appendChild(metadataDiv);
         }
 
-        function addMessage(content, role, isLoading = false, media = null, botName = null, metadata = null) {
+        function addMessage(content, role, isLoading = false, media = null, botName = null, metadata = null, orchestratorSelected = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
 
@@ -2525,7 +2680,9 @@ Always respond as ${currentBot.name} with your own distinct voice and viewpoint.
             if (currentBot && currentBot.isGroupChat && botName && role === 'assistant') {
                 const headerDiv = document.createElement('div');
                 headerDiv.className = 'message-header';
-                headerDiv.innerHTML = `<span class="bot-name-tag">${botName}</span>`;
+                const tagClass = orchestratorSelected ? 'bot-name-tag orchestrator-selected' : 'bot-name-tag';
+                const orchestratorIcon = orchestratorSelected ? '🎭 ' : '';
+                headerDiv.innerHTML = `<span class="${tagClass}">${orchestratorIcon}${botName}</span>`;
                 contentDiv.appendChild(headerDiv);
             }
 
