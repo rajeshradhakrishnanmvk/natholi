@@ -7,6 +7,7 @@ A powerful multi-bot chat interface for Ollama with intelligent orchestration an
 - 🤖 **Multi-Bot Chats** - Create multiple bots with different personalities and models
 - 👥 **Group Conversations** - Multiple bots discussing together in one chat
 - 🎭 **Intelligent Orchestrator** - AI-powered bot selection based on context and expertise
+- 🚀 **Background Tasks** - Run long tasks in background while continuing to chat
 - 🏛️ **Memory Palace** - Advanced hierarchical memory architecture
 - 🔧 **Browser Tools** - Access localStorage, sessionStorage, cookies, IndexedDB, and Cache
 - 💭 **Thinking Visualization** - See the AI's thought process
@@ -67,14 +68,30 @@ A powerful multi-bot chat interface for Ollama with intelligent orchestration an
 - 🎭 **Orange badge** = Bot selected by orchestrator
 - **Purple badge** = Round-robin selection
 
-See [ORCHESTRATOR_GUIDE.md](ORCHESTRATOR_GUIDE.md) for detailed documentation.
+See [ORCHESTRATOR_GUIDE.md](wiki/ORCHESTRATOR_GUIDE.md) for detailed documentation.
+
+### Using Background Tasks 🚀
+1. Click "**🚀 Start Background Task**" in the sidebar
+2. Select a bot and enter your task prompt
+3. Continue chatting while the task runs in background
+4. Get notified when task completes
+5. Click "**📋 View Tasks**" to see results
+
+**Perfect for:**
+- Writing long-form content (stories, articles, reports)
+- Code generation and refactoring
+- Data analysis and research
+- Any time-consuming task that doesn't need immediate attention
+
+See [BACKGROUND_TASKS_GUIDE.md](wiki/BACKGROUND_TASKS_GUIDE.md) for detailed documentation.
 
 ## 📚 Documentation
 
-- **[GROUP_CHAT_GUIDE.md](GROUP_CHAT_GUIDE.md)** - Complete group chat feature guide
-- **[ORCHESTRATOR_GUIDE.md](ORCHESTRATOR_GUIDE.md)** - Intelligent orchestrator documentation
-- **[MEMORY_PALACE_GUIDE.md](MEMORY_PALACE_GUIDE.md)** - Memory architecture guide
-- **[ORCHESTRATOR_IMPLEMENTATION.md](ORCHESTRATOR_IMPLEMENTATION.md)** - Technical implementation details
+- **[GROUP_CHAT_GUIDE.md](wiki/GROUP_CHAT_GUIDE.md)** - Complete group chat feature guide
+- **[ORCHESTRATOR_GUIDE.md](wiki/ORCHESTRATOR_GUIDE.md)** - Intelligent orchestrator documentation
+- **[BACKGROUND_TASKS_GUIDE.md](wiki/BACKGROUND_TASKS_GUIDE.md)** - Background tasks feature guide
+- **[MEMORY_PALACE_GUIDE.md](wiki/MEMORY_PALACE_GUIDE.md)** - Memory architecture guide
+- **[ORCHESTRATOR_IMPLEMENTATION.md](wiki/ORCHESTRATOR_IMPLEMENTATION.md)** - Technical implementation details
 
 ## Available Tools
 
