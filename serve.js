@@ -15,6 +15,7 @@ const mimeTypes = {
     '.mjs': 'application/javascript',
     '.css': 'text/css',
     '.json': 'application/json',
+    '.md': 'text/markdown',
 };
 
 const server = createServer(async (req, res) => {

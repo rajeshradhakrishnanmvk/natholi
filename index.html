@@ -1855,7 +1855,7 @@ Feel free to ask me anything!</div>
 
     <!-- New Bot Modal -->
     <div class="modal" id="newBotModal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 600px;">
             <h2 class="modal-title">Create New Bot</h2>
             <div class="form-group">
                 <label class="form-label" for="botName">Bot Name</label>
@@ -1864,6 +1864,16 @@ Feel free to ask me anything!</div>
             <div class="form-group">
                 <label class="form-label" for="botModel">Model</label>
                 <input type="text" id="botModel" class="form-input" placeholder="gemma4:e4b">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="botTemplate">Prompt Template (Optional)</label>
+                <select id="botTemplate" class="form-select">
+                    <option value="">-- Select a template --</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="botInstructions">Instructions (Optional)</label>
+                <textarea id="botInstructions" class="form-input" rows="8" placeholder="Enter custom instructions for this bot..."></textarea>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="cancelBotBtn">Cancel</button>
@@ -2027,6 +2037,8 @@ Feel free to ask me anything!</div>
         const newBotModal = document.getElementById('newBotModal');
         const botNameInput = document.getElementById('botName');
         const botModelInput = document.getElementById('botModel');
+        const botTemplateSelect = document.getElementById('botTemplate');
+        const botInstructionsInput = document.getElementById('botInstructions');
         const createBotBtn = document.getElementById('createBotBtn');
         const cancelBotBtn = document.getElementById('cancelBotBtn');
         const headerTitle = document.getElementById('headerTitle');
@@ -2069,6 +2081,7 @@ Feel free to ask me anything!</div>
         let editingGroupId = null;
         let useOrchestrator = false;
         let pendingFileEdit = null; // Stores pending file edit data for confirmation
+        let promptTemplates = []; // Stores parsed prompt templates from PROMPTS.md
 
         // Streaming control variables
         let streamAbortController = null;
@@ -2337,6 +2350,7 @@ Feel free to ask me anything!</div>
                             <div class="audio-preview-name">${audio.name}</div>
                             <div class="audio-preview-size">${audio.size}</div>
                         </div>
+                        
                         <button class="media-preview-remove" onclick="removeMedia('audio', ${index})">×</button>
                     </div>
                 `).join('');
@@ -2392,11 +2406,90 @@ Feel free to ask me anything!</div>
             return Date.now().toString(36) + Math.random().toString(36).substr(2);
         }
 
-        function createBot(name, model) {
+        // Fetch and parse prompt templates from PROMPTS.md
+        async function loadPromptTemplates() {
+            try {
+                const response = await fetch('/prompts/PROMPTS.md');
+                if (!response.ok) {
+                    console.warn('Could not load PROMPTS.md');
+                    return;
+                }
+                const content = await response.text();
+
+                // Parse templates - find all sections that start with "## " (excluding "# ")
+                const lines = content.split('\n');
+                const templates = [];
+                let currentTemplate = null;
+                let currentContent = [];
+                let inCodeBlock = false;
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+
+                    // Check for ## headers (template names)
+                    if (line.startsWith('## ') && !line.startsWith('### ')) {
+                        // Save previous template if exists
+                        if (currentTemplate && currentContent.length > 0) {
+                            templates.push({
+                                name: currentTemplate,
+                                content: currentContent.join('\n').trim()
+                            });
+                        }
+                        // Start new template
+                        currentTemplate = line.substring(3).trim();
+                        currentContent = [];
+                        inCodeBlock = false;
+                    }
+                    // Collect content inside code blocks (between ```md and ```)
+                    else if (line.trim().startsWith('```md')) {
+                        inCodeBlock = true;
+                    }
+                    else if (line.trim() === '```' && inCodeBlock) {
+                        inCodeBlock = false;
+                    }
+                    else if (inCodeBlock && currentTemplate) {
+                        currentContent.push(line);
+                    }
+                }
+
+                // Save last template
+                if (currentTemplate && currentContent.length > 0) {
+                    templates.push({
+                        name: currentTemplate,
+                        content: currentContent.join('\n').trim()
+                    });
+                }
+
+                promptTemplates = templates;
+                populateTemplateDropdown();
+                console.log(`Loaded ${templates.length} prompt templates`);
+            } catch (error) {
+                console.error('Error loading prompt templates:', error);
+            }
+        }
+
+        // Populate the template dropdown
+        function populateTemplateDropdown() {
+            if (!botTemplateSelect) return;
+
+            // Clear existing options except the first one
+            botTemplateSelect.innerHTML = '<option value="">-- Select a template --</option>';
+
+            // Add template options
+            promptTemplates.forEach((template, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = template.name;
+                botTemplateSelect.appendChild(option);
+            });
+        }
+
+        function createBot(name, model, instructions = '') {
             const bot = {
                 id: generateId(),
                 name: name || 'New Bot',
                 model: model || 'gemma4:e4b',
+                instructions: instructions || '',
                 history: [],
                 createdAt: Date.now()
             };
@@ -2782,7 +2875,20 @@ Feel free to ask me anything!</div>
             newBotModal.classList.add('show');
             botNameInput.value = '';
             botModelInput.value = 'gemma4:e4b';
+            botTemplateSelect.value = '';
+            botInstructionsInput.value = '';
             botNameInput.focus();
+        });
+
+        // Template selection handler
+        botTemplateSelect.addEventListener('change', () => {
+            const selectedIndex = botTemplateSelect.value;
+            if (selectedIndex !== '') {
+                const template = promptTemplates[parseInt(selectedIndex)];
+                if (template) {
+                    botInstructionsInput.value = template.content;
+                }
+            }
         });
 
         cancelBotBtn.addEventListener('click', () => {
@@ -2792,13 +2898,14 @@ Feel free to ask me anything!</div>
         createBotBtn.addEventListener('click', () => {
             const name = botNameInput.value.trim();
             const model = botModelInput.value.trim();
+            const instructions = botInstructionsInput.value.trim();
 
             if (!name) {
                 alert('Please enter a bot name');
                 return;
             }
 
-            const bot = createBot(name, model);
+            const bot = createBot(name, model, instructions);
             switchToBot(bot.id);
             renderBotsList();
             newBotModal.classList.remove('show');
@@ -3013,6 +3120,7 @@ Feel free to ask me anything!</div>
         loadBots();
         renderBotsList();
         renderChat();
+        loadPromptTemplates(); // Load prompt templates from PROMPTS.md
 
         // Initialize background tasks UI (safe check)
         setTimeout(() => {
@@ -3476,7 +3584,17 @@ Respond with ONLY the number (1-${participants.length}) of the bot that should r
             const isGroupChat = currentBotData && currentBotData.isGroupChat;
 
             if (!isGroupChat) {
-                // For regular chats, return history as-is
+                // For regular chats, add instructions if present
+                if (currentBot.instructions && currentBot.instructions.trim()) {
+                    const historyWithInstructions = [
+                        {
+                            role: 'system',
+                            content: currentBot.instructions
+                        },
+                        ...history
+                    ];
+                    return historyWithInstructions;
+                }
                 return history;
             }
 
@@ -3487,12 +3605,19 @@ Respond with ONLY the number (1-${participants.length}) of the bot that should r
             const participants = getGroupParticipants(currentBotId);
             const participantNames = participants.map(p => p.name).join(', ');
 
-            enhancedHistory.push({
-                role: 'system',
-                content: `You are ${currentBot.name}, participating in a group chat with: ${participantNames}.
+            let systemMessage = `You are ${currentBot.name}, participating in a group chat with: ${participantNames}.
 Your unique perspective and personality should come through in your responses.
 When you see messages from other bots, they will be prefixed with their name in square brackets.
-Always respond as ${currentBot.name} with your own distinct voice and viewpoint.`
+Always respond as ${currentBot.name} with your own distinct voice and viewpoint.`;
+
+            // Add bot-specific instructions if present
+            if (currentBot.instructions && currentBot.instructions.trim()) {
+                systemMessage += `\n\nYour specific instructions:\n${currentBot.instructions}`;
+            }
+
+            enhancedHistory.push({
+                role: 'system',
+                content: systemMessage
             });
 
             // Process each message to add bot identity markers
